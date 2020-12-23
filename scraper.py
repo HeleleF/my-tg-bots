@@ -9,34 +9,24 @@ import re
 
 from secrets import DOMAIN, API_ENDPOINT
 
-log = logging.getLogger('ored-scraper')
-log.setLevel(logging.DEBUG)
-
-fh = logging.FileHandler('./ored-scraper.log', 'w', 'utf-8')
-ch = logging.StreamHandler()
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', '%Y-%m-%d %H:%M:%S')
-fh.setFormatter(formatter)
-ch.setFormatter(formatter)
-
-log.addHandler(fh)
-log.addHandler(ch)
+log = logging.getLogger('ored-tg')
 
 class OredScraper:
 
-    def __init__(self, on_data=None, on_error=None, delay=3):
-        self.running = False
-        self.sess = requests.Session()
-        self.sess.headers.update({
+    def __init__(self, on_data=None, on_error=None, delay: int=3):
+        self.__running = False
+        self.__sess = requests.Session()
+        self.__sess.headers.update({
             'User-Agent': 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36'
         })
-        self.delay = delay
-        self.hds = {
+        self.__delay = delay
+        self.__hds = {
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
             'Origin': DOMAIN,
             'Referer': f'{DOMAIN}/',
             'X-Requested-With': 'XMLHttpRequest'
         }
-        self.payload = {
+        self.__payload = {
                 "login": "false",
                 "expireTimestamp": "0",
                 "pokemon": "true",
@@ -84,52 +74,71 @@ class OredScraper:
                 "reids": "",
                 "eids": "0"
         }
-        self.setup()
-        self.thr = None
-        self.action_cb = on_data
-        self.error_cb = on_error
+        
+        self.__scraper_thread = None
+        self.__remover_thread = None
 
-    def setup(self):
-        r = self.sess.get(f'{DOMAIN}/')
+        self.__action_cb = on_data
+        self.__error_cb = on_error
+
+        self.__filters = None
+
+        self.__setup()
+
+    def __setup(self) -> None:
+        """ Calls the site once to get the token and setup the cookies """
+
+        r = self.__sess.get(f'{DOMAIN}/')
         m = re.search(r'var token = \'(\S{42,48})\';', r.text)
 
         if m:
             log.debug(f'Token set to {m[1]}')
-            self.payload['token'] = m[1]
+            self.__payload['token'] = m[1]
+        else:
 
-    def get_data(self):
+            log.error(f'No token found!')
+
+            if self.__error_cb:
+                self.__error_cb('No token found!')
+
+    def __apply_filter(self, data):
+
+        return data
+
+    def __get_data(self):
+        """ Queries data from the endpoint and returns it as a list"""
 
         try:
-            response = self.sess.post(f'{DOMAIN}/{API_ENDPOINT}', data=self.payload, headers=self.hds, timeout=10)
+            response = self.__sess.post(f'{DOMAIN}/{API_ENDPOINT}', data=self.__payload, headers=self.__hds, timeout=10)
             response.raise_for_status()
 
         except requests.HTTPError as httpe:
             log.error(f'Get seasons failed with http error: {httpe}')
-            if self.error_cb:
-                self.error_cb(httpe)
+            if self.__error_cb:
+                self.__error_cb(httpe)
             return []
         except requests.exceptions.ConnectionError as cerr:
             log.error(f'Get seasons failed with network problems: {cerr}')
-            if self.error_cb:
-                self.error_cb(cerr)
+            if self.__error_cb:
+                self.__error_cb(cerr)
             return []
         except requests.exceptions.Timeout:
             log.error('Get seasons timed out!')
-            if self.error_cb:
-                self.error_cb('timeout')
+            if self.__error_cb:
+                self.__error_cb('timeout')
             return []
         except requests.exceptions.RequestException as err:
             log.error(f'Get seasons failed with request error: {err}')
-            if self.error_cb:
-                self.error_cb(err)
+            if self.__error_cb:
+                self.__error_cb(err)
             return []
 
         try:
             data = response.json()
         except ValueError:
             log.error(f'Recieved non-json response: {response.text}')
-            if self.error_cb:
-                self.error_cb(data)
+            if self.__error_cb:
+                self.__error_cb(f'Recieved non-json response: {response.text}')
             return []
 
         pokes = data.get('pokemons')
@@ -138,41 +147,54 @@ class OredScraper:
             log.warning('Missing pokemons?')
             return []
 
-        return pokes
+        return self.__apply_filter(pokes)
 
-    def scraping_loop(self, *args):
+    def __scraping_loop(self, filters = None):
+        """ Repeatedly gets data and calls the callback with it """
 
-        while self.running:
+        if filters:
+            self.__filters = filters
 
-            data = self.get_data()
-            log.debug(f'ACTION {len(data)}')
+        while self.__running:
 
-            if self.action_cb:
-                self.action_cb(data)
+            data = self.__get_data()
 
-            time.sleep(self.delay)
+            if self.__action_cb and len(data):
+                self.__action_cb(data)
+
+            time.sleep(self.__delay)
 
     def start(self, *args):
+        """ Runs the scraper by starting a separate thread that runs the scraper loop """
 
-        if self.running:
+        if self.__running:
             log.debug('Already running')
             return
 
-        self.running = True
+        self.__running = True
 
-        self.thr = Thread(target=self.scraping_loop, args=args)
-        self.thr.start()
+        self.__scraper_thread = Thread(target=self.__scraping_loop, args=args)
+        self.__scraper_thread.start()
         log.debug('Started')
 
     def stop(self):
+        """ Stops the scraper by joining the thread back together """
 
-        if not self.running:
-            log.debug('Already stopped')
+        if not self.__running:
+            log.debug('Scraper is already stopped!')
             return
 
-        self.running = False
+        self.__running = False
 
-        log.debug('Stopping...')
-        self.thr.join()
-        log.debug('Stopped')
-        self.thr = None
+        log.debug('Stopping scraper thread...')
+        self.__scraper_thread.join()
+        log.debug('Stopped scraper thread!')
+        self.__scraper_thread = None
+
+    def update_filters(self, filters):
+
+        self.__filters = filters
+
+    def is_running(self):
+        """ Whether the scraper is currently running """
+        return self.__running

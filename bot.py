@@ -40,7 +40,9 @@ def error(update: Update, context: CallbackContext):
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
 
-    scraper.start()
+    filters = context.user_data.get('filters', None)
+
+    scraper.start(filters=filters)
 
     update.message.reply_text('Scraper started')
 
@@ -56,25 +58,20 @@ def ping(update: Update, context: CallbackContext) -> None:
 
 def set_filter(update: Update, context: CallbackContext) -> None:
 
-    msg = update.message.text[4:].strip()
+    new_filters = 'bub'
 
-    key, value = msg.split(' ')
-    m = re.search(r'(\d+)(\+)', value)
-
-    if key == 'iv' and m is not None:
-        iv_filter = m[1]
-        log.debug(f'Filter set to {m[1]}')
+    context.user_data['filters'] = new_filters
+    scraper.update_filters(new_filters)
 
     update.message.reply_text('Filters updated')
 
 def help_command(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
-    update.message.reply_text('This will show the help stuff')
-
+    update.message.reply_text('/start to start scraping. /stop to stop it /ping to check if server is alive')
 
 def echo(update: Update, context: CallbackContext) -> None:
     """Echo the user message."""
-    update.message.reply_text(f'I dont know: "{update.message.text}"')
+    update.message.reply_text(f'I dont know: "{update.message.text}", check /help')
 
 def create_html_message(e, now_time):
 
@@ -113,12 +110,8 @@ def send_encounter(poke, nt):
         return False
     
 def on_data_recieved(poke_list):
-    log.debug('recv')
 
     now_time = time.mktime(time.localtime())
-
-    if iv_filter is not None:
-        poke_list = [ p for p in poke_list if (p.get('individual_attack', 0) + e.get('individual_defense', 0) + e.get('individual_stamina', 0)) / 45 > iv_filter ]
 
     for poke in poke_list:
 
@@ -126,14 +119,13 @@ def on_data_recieved(poke_list):
 
         if pokes_db.get(enc_id, False):
             log.debug('Already known')
-            return
+            continue
 
         log.debug(f'New encounter with id {enc_id} added')
         pokes_db[enc_id] = send_encounter(poke, now_time)
 
 
 def on_error(err):
-    log.debug('err')
 
     updater.bot.send_message(chat_id=BOT_MYSELF_CHAT_ID, text=f'Scraper failed with {err}', parse_mode=ParseMode.HTML)
 
@@ -142,7 +134,6 @@ scraper = OredScraper(on_data=on_data_recieved, on_error=on_error)
 
 def main():
     """Start the bot."""
-
 
     # Get the dispatcher to register handlers
     dispatcher = updater.dispatcher
@@ -167,6 +158,10 @@ def main():
     # SIGTERM or SIGABRT. This should be used most of the time, since
     # start_polling() is non-blocking and will stop the bot gracefully.
     updater.idle()
+
+    # Stop scraper when bot gets killed
+    if scraper.is_running():
+        scraper.stop()
 
     log.debug('Killed')
 
