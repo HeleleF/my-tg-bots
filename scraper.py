@@ -23,7 +23,7 @@ log.addHandler(ch)
 
 class OredScraper:
 
-    def __init__(self, cb=None, ecb=None, delay=3):
+    def __init__(self, on_data=None, on_error=None, delay=3):
         self.running = False
         self.sess = requests.Session()
         self.sess.headers.update({
@@ -65,8 +65,8 @@ class OredScraper:
                 "spawnpoints": "false",
                 "scanlocations": "false",
                 "lastspawns": "false",
-                "minIV": "91",
-                "prevMinIV": "91",
+                "minIV": "85",
+                "prevMinIV": "85",
                 "minLevel": "NaN",
                 "prevMinLevel": "0",
                 "minPVP": "",
@@ -86,8 +86,8 @@ class OredScraper:
         }
         self.setup()
         self.thr = None
-        self.action_cb = cb
-        self.error_cb = ecb
+        self.action_cb = on_data
+        self.error_cb = on_error
 
     def setup(self):
         r = self.sess.get(f'{DOMAIN}/')
@@ -176,4 +176,3 @@ class OredScraper:
         self.thr.join()
         log.debug('Stopped')
         self.thr = None
-

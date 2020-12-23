@@ -3,11 +3,14 @@
 
 from secrets import BOT_AUTH_TOKEN, BOT_MYSELF_CHAT_ID
 import logging
+import re
 
-from telegram import Update
+from telegram import Update, ParseMode
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.error import NetworkError
 
 from scraper import OredScraper
+import time
 
 log = logging.getLogger('ored-tg')
 log.setLevel(logging.DEBUG)
@@ -23,6 +26,14 @@ log.addHandler(ch)
 
 # Create the Updater and pass it your bot's token.
 updater = Updater(BOT_AUTH_TOKEN)
+
+pokes_db = dict()
+poke_filter = None
+iv_filter = None
+
+def error(update: Update, context: CallbackContext):
+    """Log Errors caused by Updates."""
+    log.error(f'Update "{update}" caused error "{context.error}"')
 
 # Define a few command handlers. These usually take the two arguments update and
 # context. Error handlers also receive the raised TelegramError object in error.
@@ -43,6 +54,18 @@ def stop(update: Update, context: CallbackContext) -> None:
 def ping(update: Update, context: CallbackContext) -> None:
     update.message.reply_text('pong')
 
+def set_filter(update: Update, context: CallbackContext) -> None:
+
+    msg = update.message.text[4:].strip()
+
+    key, value = msg.split(' ')
+    m = re.search(r'(\d+)(\+)', value)
+
+    if key == 'iv' and m is not None:
+        iv_filter = m[1]
+        log.debug(f'Filter set to {m[1]}')
+
+    update.message.reply_text('Filters updated')
 
 def help_command(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
@@ -53,18 +76,69 @@ def echo(update: Update, context: CallbackContext) -> None:
     """Echo the user message."""
     update.message.reply_text(f'I dont know: "{update.message.text}"')
 
-def on_data_recieved(data):
+def create_html_message(e, now_time):
+
+    # format IVs as hex string if they exist
+    if e['individual_attack'] is not None:
+        ivs = f"{e['individual_attack']:X}{e['individual_defense']:X}{e['individual_stamina']:X}"
+    else:
+        ivs = '???'
+
+    if e['level']:
+        lvlcp = f"Lvl {e['level']} - <b>{e['cp']} CP</b>"
+    else:
+        lvlcp = "Lvl ??? - CP ???"
+
+    mytxt = f"{e['pokemon_name']} {lvlcp} ({ivs})\r\nVerified: {'✅' if e['is_verified_despawn'] else '❌'}\r\n"
+
+    despawn_time = time.localtime(e['disappear_time'] / 1000)
+    seconds_left = time.mktime(despawn_time) - now_time
+
+    mins, secs = divmod(seconds_left, 60)
+
+    result = f"{mytxt}Bis: <b>{time.strftime('%H:%M:%S', despawn_time)}</b> (Noch <b>{int(mins)} Min {int(secs)}</b>)"
+
+    return result
+
+def send_encounter(poke, nt):
+
+    html_msg = create_html_message(poke, nt)
+
+    try:
+        updater.bot.send_message(chat_id=BOT_MYSELF_CHAT_ID, text=html_msg, parse_mode=ParseMode.HTML)
+        updater.bot.send_location(chat_id=BOT_MYSELF_CHAT_ID, latitude=poke['latitude'], longitude=poke['longitude'])
+        return True
+    except NetworkError:
+        log.debug('Sending failed')
+        return False
+    
+def on_data_recieved(poke_list):
     log.debug('recv')
 
-    pokes = "\n".join(map(lambda x: x.get('pokemon_name'), data))
+    now_time = time.mktime(time.localtime())
 
-    updater.bot.send_message(chat_id=BOT_MYSELF_CHAT_ID, text=f'recieved {pokes}')
+    if iv_filter is not None:
+        poke_list = [ p for p in poke_list if (p.get('individual_attack', 0) + e.get('individual_defense', 0) + e.get('individual_stamina', 0)) / 45 > iv_filter ]
+
+    for poke in poke_list:
+
+        enc_id = poke.get('encounter_id', '')
+
+        if pokes_db.get(enc_id, False):
+            log.debug('Already known')
+            return
+
+        log.debug(f'New encounter with id {enc_id} added')
+        pokes_db[enc_id] = send_encounter(poke, now_time)
+
 
 def on_error(err):
     log.debug('err')
 
+    updater.bot.send_message(chat_id=BOT_MYSELF_CHAT_ID, text=f'Scraper failed with {err}', parse_mode=ParseMode.HTML)
+
 log.debug('Loading scraper')
-scraper = OredScraper(cb=on_data_recieved, ecb=on_error)
+scraper = OredScraper(on_data=on_data_recieved, on_error=on_error)
 
 def main():
     """Start the bot."""
@@ -77,10 +151,12 @@ def main():
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("stop", stop))
     dispatcher.add_handler(CommandHandler("ping", ping))
+    dispatcher.add_handler(CommandHandler("set", set_filter))
     dispatcher.add_handler(CommandHandler("help", help_command))
 
     # on noncommand i.e message - echo the message on Telegram
     dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, echo))
+    dispatcher.add_error_handler(error)
 
     log.debug('Starting...')
 
