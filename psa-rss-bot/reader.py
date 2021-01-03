@@ -45,13 +45,14 @@ def shut_down(signal, frame):
 
 def work(bot: Bot):
 
+    global previousLast
     log.info('Requesting...')
 
     try:
         r = requests.get(PSA_FEED, headers={ 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X x.y; rv:42.0) Gecko/20100101 Firefox/42.0' })
-    except requests.RequestException as re:
-        log.error(f'Failed to get feed because {re}')
-        bot.send_message(chat_id=CHAT_ME, text=f'REQUEST FAILED\n{re}', parse_mode=ParseMode.HTML)
+    except requests.RequestException as rex:
+        log.error(f'Failed to get feed because {rex}')
+        bot.send_message(chat_id=CHAT_ME, text=f'REQUEST FAILED\n{rex}', parse_mode=ParseMode.HTML)
         return
 
     feed = BeautifulSoup(r.content, 'xml') # using lxml strips the CDATA stuff!!!
@@ -118,12 +119,12 @@ def work(bot: Bot):
         bot.send_message(chat_id=CHAT_ME, text='_Nothing changed_', parse_mode=ParseMode.MARKDOWN_V2)
 
 def main():
-    
+
     try:
         token = os.environ['TELEGRAM_BOT_API_TOKEN']
     except KeyError:
         log.error('No API Token found!')
-        sys.exit(-1) 
+        sys.exit(-1)
 
     try:
         updater = Updater(token)
