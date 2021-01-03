@@ -1,2 +1,2 @@
-# ored-tg-bot
-My first telegram bot 🎉
+# bots
+hier gehen alle bots rein 🎉
