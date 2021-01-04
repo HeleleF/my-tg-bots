@@ -28,13 +28,21 @@ ch.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', '
 log.addHandler(fh)
 log.addHandler(ch)
 
-PSA_FEED = 'https://psarips.uk/feed/'
+try:
+    PSA_FEED = os.environ['PSA_FEED_URL']
+except KeyError:
+    log.error('No feed url found!')
+    sys.exit(-1)
+
+try:
+    CHAT_ME = os.environ['TELEGRAM_CHAT_MYSELF_ID']
+except KeyError:
+    log.error('No chat ID found!')
+    sys.exit(-1)
 
 IGNORE_PATTERN = re.compile(r'psa|x265|hevc|\d{4}', flags=re.IGNORECASE)
 ESCAPE_CHARS = re.compile(r'(\(|\)|\[|\]|\.|\=)')
 GUID_PATTERN = re.compile(r'\?p\=(?P<guid>\d+)$')
-
-CHAT_ME = 426355102
 
 DB = dict()
 previousLast = ''
