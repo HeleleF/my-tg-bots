@@ -13,7 +13,7 @@ log = logging.getLogger('ored-tg')
 
 class OredScraper:
 
-    def __init__(self, on_data=None, on_error=None, delay: int=3):
+    def __init__(self, on_data=None, on_error=None, delay: int=5):
         self.__running = False
         self.__sess = requests.Session()
         self.__sess.headers.update({
@@ -55,8 +55,8 @@ class OredScraper:
                 "spawnpoints": "false",
                 "scanlocations": "false",
                 "lastspawns": "false",
-                "minIV": "99",
-                "prevMinIV": "99",
+                "minIV": "97",
+                "prevMinIV": "97",
                 "minLevel": "NaN",
                 "prevMinLevel": "0",
                 "minPVP": "",
@@ -141,10 +141,13 @@ class OredScraper:
                 self.__error_cb(f'Recieved non-json response: {response.text}')
             return []
 
-        pokes = data.get('pokemons', [])
+        log.info(data)
 
-        if not pokes:
-            log.warning('Missing pokemons?')
+        try:
+            pokes = data['pokemons'] # sic!
+        except KeyError:
+            log.warning('JSON data is missing key "pokemons"')
+            log.debug(data)
             return []
 
         return self.__apply_filter(pokes)
