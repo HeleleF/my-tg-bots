@@ -40,9 +40,9 @@ def error(update: Update, context: CallbackContext):
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
 
-    filters = context.user_data.get('filters', None)
+    filters = context.user_data.get('filters', 'defaultfilter')
 
-    scraper.start(filters=filters)
+    scraper.start(filters)
 
     update.message.reply_text('Scraper started')
 

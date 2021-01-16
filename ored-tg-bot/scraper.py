@@ -55,8 +55,8 @@ class OredScraper:
                 "spawnpoints": "false",
                 "scanlocations": "false",
                 "lastspawns": "false",
-                "minIV": "85",
-                "prevMinIV": "85",
+                "minIV": "99",
+                "prevMinIV": "99",
                 "minLevel": "NaN",
                 "prevMinLevel": "0",
                 "minPVP": "",
@@ -141,7 +141,7 @@ class OredScraper:
                 self.__error_cb(f'Recieved non-json response: {response.text}')
             return []
 
-        pokes = data.get('pokemons')
+        pokes = data.get('pokemons', [])
 
         if not pokes:
             log.warning('Missing pokemons?')
@@ -164,7 +164,7 @@ class OredScraper:
 
             time.sleep(self.__delay)
 
-    def start(self, *args):
+    def start(self, filters, *args):
         """ Runs the scraper by starting a separate thread that runs the scraper loop """
 
         if self.__running:
@@ -175,7 +175,7 @@ class OredScraper:
 
         self.__scraper_thread = Thread(target=self.__scraping_loop, args=args)
         self.__scraper_thread.start()
-        log.debug('Started')
+        log.debug(f'Started with filters: {filters}')
 
     def stop(self):
         """ Stops the scraper by joining the thread back together """
