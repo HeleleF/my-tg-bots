@@ -72,7 +72,8 @@ class OredScraper:
                 "oNeLat": "52.65587329539442",
                 "oNeLng": "13.261485099792482",
                 "reids": "",
-                "eids": "0"
+                "eids": "0",
+		"exMinIV": "113,149"
         }
         
         self.__scraper_thread = None
@@ -140,8 +141,6 @@ class OredScraper:
             if self.__error_cb:
                 self.__error_cb(f'Recieved non-json response: {response.text}')
             return []
-
-        log.info(data)
 
         try:
             pokes = data['pokemons'] # sic!

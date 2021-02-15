@@ -118,7 +118,7 @@ def on_data_recieved(poke_list):
         enc_id = poke.get('encounter_id', '')
 
         if pokes_db.get(enc_id, False):
-            log.debug('Already known')
+            # log.debug('Already known')
             continue
 
         log.debug(f'New encounter with id {enc_id} added')
