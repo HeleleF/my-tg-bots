@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
 
-import requests
 import logging
-from threading import Event, Thread
-import time
 import re
+import time
 from datetime import datetime, timedelta
+from secrets import API_ENDPOINT, DOMAIN
+from threading import Event, Thread
+
 import dateutil.tz
-from pytz import timezone
-
+import requests
+from telegram import Bot, ParseMode
 from telegram.error import NetworkError
-from telegram import ParseMode, Bot
-
-from secrets import DOMAIN, API_ENDPOINT
 
 log = logging.getLogger('ored-tg')
 
@@ -95,7 +93,7 @@ class OredScraper:
         self.CLEANUP_EXPIRED_INTERVAL = 600
 
         self.__filters = None
-        self.__tz = timezone('Europe/Berlin')
+        self.__tz = dateutil.tz.gettz('Europe/Berlin')
 
         self.__token_expiration_date = None
 
@@ -115,7 +113,7 @@ class OredScraper:
         self.__payload['token'] = m[1]
 
         # midnight today
-        self.__token_expiration_date = datetime.now(dateutil.tz.gettz('Europe/Berlin')).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(1)
+        self.__token_expiration_date = datetime.now(self.__tz).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(1)
 
         self.__log_msg('Token updated to "{m[1]}" 💪🏻')
         return True
@@ -210,11 +208,10 @@ class OredScraper:
             self.__tg_bot.send_message(chat_id=self.__CHAT_ID, text=html_msg, parse_mode=ParseMode.HTML)
             self.__tg_bot.send_location(chat_id=self.__CHAT_ID, latitude=poke['latitude'], longitude=poke['longitude'])
 
-            self.__pokes_db[poke['encounter_id']] = True
+            self.__pokes_db[poke['encounter_id']] = despawn_time
 
         except NetworkError:
             log.debug('Sending failed')
-            self.__pokes_db[poke['encounter_id']] = False
 
     def __log_msg(self, msg_or_err, is_err = False):
 
@@ -261,8 +258,8 @@ class OredScraper:
             log.debug('Removing...')
 
             # iterate through database and remove expired encounters
-            for enc_id, p_info in self.__pokes_db.copy().items():
-                if p_info['despawn'] - now < 5:
+            for enc_id, despawn_time in self.__pokes_db.copy().items():
+                if despawn_time - now < 5:
                     del self.__pokes_db[enc_id]
 
     def start(self, filters, *args):
