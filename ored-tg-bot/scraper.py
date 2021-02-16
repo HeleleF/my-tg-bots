@@ -6,7 +6,8 @@ import logging
 from threading import Event, Thread
 import time
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
+import dateutil.tz
 from pytz import timezone
 
 from telegram.error import NetworkError
@@ -96,21 +97,42 @@ class OredScraper:
         self.__filters = None
         self.__tz = timezone('Europe/Berlin')
 
-        self.__setup()
+        self.__token_expiration_date = None
 
-    def __setup(self) -> None:
+        self.__update_token()
+
+    def __update_token(self) -> bool:
         """ Calls the site once to get the token and setup the cookies """
 
         r = self.__sess.get(f'{DOMAIN}/')
         m = re.search(r'var token = \'(\S{42,48})\';', r.text)
 
-        if m:
-            log.debug(f'Token set to {m[1]}')
-            self.__payload['token'] = m[1]
-            self.__tg_bot.send_message(chat_id=self.__CHAT_ID, text='💪🏻 Scraper loaded 💪🏻', parse_mode=ParseMode.HTML)
-        else:
-            log.error(f'No token found!')
-            self.__tg_bot.send_message(chat_id=self.__CHAT_ID, text='❌ No token found! ❌', parse_mode=ParseMode.HTML)
+        if not m:
+            self.__log_msg(f'No token found!', is_err=True)
+            return False
+
+        log.debug(f'Token set to {m[1]}')
+        self.__payload['token'] = m[1]
+
+        # midnight today
+        self.__token_expiration_date = datetime.now(dateutil.tz.gettz('Europe/Berlin')).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(1)
+
+        self.__log_msg('Token updated to "{m[1]}" 💪🏻')
+        return True
+
+    def __check_token(self):
+        """ Returns TRUE if token expired and was successfully updated to a new one
+
+        Returns FALSE if token is not expired
+
+        Returns FALSE if token expired and was NOT updated to a new one because of errors
+        """
+
+        now = datetime.now(dateutil.tz.gettz('Europe/Berlin'))
+
+        if (self.__token_expiration_date - now).total_seconds() < 0:
+            return self.__update_token()
+        return False
 
     def __apply_filter(self, data):
 
@@ -124,28 +146,40 @@ class OredScraper:
             response.raise_for_status()
 
         except requests.HTTPError as httpe:
-            self.__on_error(f'POST failed with http error: {httpe}')
+
+            if response.status_code == 400:
+                is_updated = self.__check_token()
+
+                if not is_updated:
+                    # either token is not expired -> BAD, because we got a 400 error and we dont know why
+                    # or token expired and not updated -> BAD, we failed to get a new one
+                    self.__log_msg(f'Recieved {httpe}\n Failed to update the token OR unknown 400. Either way, stop scanning to be safe.', is_err=True)
+                    self.stop()
+
+            else:
+                self.__log_msg(f'Stop scanning because: {httpe}', is_err=True)
+                self.stop()
             return []
         except requests.exceptions.ConnectionError as cerr:
-            self.__on_error(f'POST failed with network error: {cerr}')
+            self.__log_msg(f'POST failed with network error: {cerr}', is_err=True)
             return []
         except requests.exceptions.Timeout:
-            self.__on_error(f'POST timed out')
+            self.__log_msg(f'POST timed out', is_err=True)
             return []
         except requests.exceptions.RequestException as err:
-            self.__on_error(f'POST failed with request error: {err}')
+            self.__log_msg(f'POST failed with request error: {err}', is_err=True)
             return []
 
         try:
             data = response.json()
         except ValueError:
-            self.__on_error(f'Recieved non-json response: {response.text}')
+            self.__log_msg(f'Recieved non-json response: {response.text}', is_err=True)
             return []
 
         try:
             pokes = data['pokemons'] # sic!
         except KeyError:
-            log.warning('JSON data is missing key "pokemons"')
+            self.__log_msg('JSON data is missing key "pokemons"')
             log.debug(data)
             return []
 
@@ -182,10 +216,18 @@ class OredScraper:
             log.debug('Sending failed')
             self.__pokes_db[poke['encounter_id']] = False
 
-    def __on_error(self, err):
+    def __log_msg(self, msg_or_err, is_err = False):
 
-        log.error(err)
-        self.__tg_bot.send_message(chat_id=self.__CHAT_ID, text=f'Scraper failed with {err}', parse_mode=ParseMode.HTML)
+        if is_err:
+            log.error(msg_or_err)
+        else:
+            log.debug(msg_or_err)
+
+        self.__tg_bot.send_message(
+            chat_id=self.__CHAT_ID,
+            text=f'❌❌❌\n{msg_or_err}\n❌❌❌' if is_err else f'DEBUG:\n{msg_or_err}',
+            parse_mode=ParseMode.HTML
+        )
 
     def __scraping_loop(self, filters = None):
         """ Repeatedly gets data and calls the callback with it """
@@ -227,8 +269,10 @@ class OredScraper:
         """ Runs the scraper by starting a separate thread that runs the scraper loop """
 
         if self.__running:
-            log.debug('Already running')
+            self.__log_msg('Already running')
             return
+
+        self.__check_token()
 
         self.__stopper.clear()
         self.__remover_thread = Thread(target=self.__removing_loop)
@@ -240,10 +284,10 @@ class OredScraper:
         log.debug(f'Started with filters: {filters}')
 
     def stop(self):
-        """ Stops the scraper by joining the thread back together """
+        """ Stops the scraper by joining the threads back together """
 
         if not self.__running:
-            log.debug('Scraper is already stopped!')
+            self.__log_msg('Scraper is already stopped!')
             return
 
         self.__running = False
