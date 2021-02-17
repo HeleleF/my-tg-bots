@@ -17,7 +17,7 @@ log = logging.getLogger('ored-tg')
 
 class OredScraper:
 
-    def __init__(self, tg_bot: Bot, chat_id: str, delay: int=5):
+    def __init__(self, tg_bot: Bot, chat_id: str, delay: int=5) -> None:
         self.__running = False
         self.__sess = requests.Session()
         self.__sess.headers.update({
@@ -80,6 +80,8 @@ class OredScraper:
 		        "exMinIV": "113,149"
         }
 
+        self.__filters_string = 'iv=97&exiv=113,149'
+
         self.__pokes_db = dict()
         
         self.__scraper_thread = None
@@ -92,7 +94,6 @@ class OredScraper:
         # check for expired encounters every this many seconds
         self.CLEANUP_EXPIRED_INTERVAL = 600
 
-        self.__filters = None
         self.__tz = dateutil.tz.gettz('Europe/Berlin')
 
         self.__token_expiration_date = None
@@ -102,6 +103,8 @@ class OredScraper:
     def __update_token(self) -> bool:
         """ Calls the site once to get the token and setup the cookies """
 
+        self.__sess.cookies.clear()
+
         r = self.__sess.get(f'{DOMAIN}/')
         m = re.search(r'var token = \'(\S{42,48})\';', r.text)
 
@@ -109,16 +112,19 @@ class OredScraper:
             self.__log_msg(f'No token found!', is_err=True)
             return False
 
-        log.debug(f'Token set to {m[1]}')
+        old_token = self.__payload.get('token', None)
         self.__payload['token'] = m[1]
 
         # midnight today
         self.__token_expiration_date = datetime.now(self.__tz).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(1)
 
-        self.__log_msg('Token updated to "{m[1]}" 💪🏻')
+        if old_token:
+            self.__log_msg(f'TOKEN UPDATED: "{old_token}" -> "{m[1]}"')
+        else:
+            self.__log_msg(f'TOKEN SET: "{m[1]}"')
         return True
 
-    def __check_token(self):
+    def __check_token(self) -> bool:
         """ Returns TRUE if token expired and was successfully updated to a new one
 
         Returns FALSE if token is not expired
@@ -126,17 +132,14 @@ class OredScraper:
         Returns FALSE if token expired and was NOT updated to a new one because of errors
         """
 
-        now = datetime.now(dateutil.tz.gettz('Europe/Berlin'))
+        now = datetime.now(self.__tz)
 
         if (self.__token_expiration_date - now).total_seconds() < 0:
+            log.debug('Token needs update!')
             return self.__update_token()
         return False
 
-    def __apply_filter(self, data):
-
-        return data
-
-    def __get_data(self):
+    def __get_data(self) -> list(str):
         """ Queries data from the endpoint and returns it as a list"""
 
         try:
@@ -152,11 +155,13 @@ class OredScraper:
                     # either token is not expired -> BAD, because we got a 400 error and we dont know why
                     # or token expired and not updated -> BAD, we failed to get a new one
                     self.__log_msg(f'Recieved {httpe}\n Failed to update the token OR unknown 400. Either way, stop scanning to be safe.', is_err=True)
-                    self.stop()
+                    self.__running = False
+                    self.__stopper.set()
 
             else:
                 self.__log_msg(f'Stop scanning because: {httpe}', is_err=True)
-                self.stop()
+                self.__running = False
+                self.__stopper.set()
             return []
         except requests.exceptions.ConnectionError as cerr:
             self.__log_msg(f'POST failed with network error: {cerr}', is_err=True)
@@ -181,9 +186,9 @@ class OredScraper:
             log.debug(data)
             return []
 
-        return self.__apply_filter(pokes)
+        return pokes
 
-    def __send_encounter(self, poke, now: int):
+    def __send_encounter(self, poke, now: int) -> None:
 
         # format IVs as hex string if they exist
         if poke['individual_attack'] is not None:
@@ -196,24 +201,25 @@ class OredScraper:
         else:
             lvlcp = "Lvl ??? - CP ???"
 
-        mytxt = f"{poke['pokemon_name']} {lvlcp} ({ivs})\r\nVerified: {'✅' if poke['is_verified_despawn'] else '❌'}\r\n"
+        header = f"{poke['pokemon_name']} {lvlcp} ({ivs})\r\nVerified: {'✅' if poke['is_verified_despawn'] else '❌'}\r\n"
 
         despawn_time = poke['disappear_time'] / 1e3
-
         mins, secs = divmod(int(despawn_time) - now, 60)
 
-        html_msg = f"{mytxt}Bis: <b>{datetime.fromtimestamp(despawn_time, tz=self.__tz).strftime('%H:%M:%S')}</b> (Noch <b>{int(mins)} Min {int(secs)}</b>)"
+        html_msg = f"{header}Bis: <b>{datetime.fromtimestamp(despawn_time, tz=self.__tz).strftime('%H:%M:%S')}</b> (Noch <b>{int(mins)} Min {int(secs)}</b>)"
 
         try:
             self.__tg_bot.send_message(chat_id=self.__CHAT_ID, text=html_msg, parse_mode=ParseMode.HTML)
             self.__tg_bot.send_location(chat_id=self.__CHAT_ID, latitude=poke['latitude'], longitude=poke['longitude'])
 
+            # store despawn time in ms
+            # this lets us remove expired encounters
             self.__pokes_db[poke['encounter_id']] = despawn_time
 
         except NetworkError:
             log.debug('Sending failed')
 
-    def __log_msg(self, msg_or_err, is_err = False):
+    def __log_msg(self, msg_or_err, is_err = False) -> None:
 
         if is_err:
             log.error(msg_or_err)
@@ -226,18 +232,17 @@ class OredScraper:
             parse_mode=ParseMode.HTML
         )
 
-    def __scraping_loop(self, filters = None):
-        """ Repeatedly gets data and calls the callback with it """
+    def __scraping_loop(self, filters = None) -> None:
+        """ Repeatedly gets data and sends messages with it """
 
         if filters:
-            self.__filters = filters
+            self.update_filters(filters)
 
         while self.__running:
 
-            filtered_pokes = self.__get_data()
             now_time = int(datetime.now(self.__tz).timestamp())
 
-            for poke in filtered_pokes:
+            for poke in self.__get_data():
 
                 enc_id = poke.get('encounter_id', '')
 
@@ -250,7 +255,15 @@ class OredScraper:
 
             time.sleep(self.__delay)
 
-    def __removing_loop(self):
+    def __removing_loop(self) -> None:
+        """
+        Loops through the poke db and deletes
+        expired encounters 
+        
+        (for simplicity, we consider
+        encounters with less than 5 seconds remaining time to
+        be expired, since we couldnt get to them anyway)
+        """
 
         # repeat until stop flag is set
         while not self.__stopper.wait(self.CLEANUP_EXPIRED_INTERVAL):
@@ -262,7 +275,7 @@ class OredScraper:
                 if despawn_time - now < 5:
                     del self.__pokes_db[enc_id]
 
-    def start(self, filters, *args):
+    def start(self, *args) -> None:
         """ Runs the scraper by starting a separate thread that runs the scraper loop """
 
         if self.__running:
@@ -278,9 +291,9 @@ class OredScraper:
         self.__running = True
         self.__scraper_thread = Thread(target=self.__scraping_loop, args=args)
         self.__scraper_thread.start()
-        log.debug(f'Started with filters: {filters}')
+        log.debug(f'Started')
 
-    def stop(self):
+    def stop(self) -> None:
         """ Stops the scraper by joining the threads back together """
 
         if not self.__running:
@@ -303,13 +316,40 @@ class OredScraper:
 
         self.__pokes_db = dict()
 
-    def update_filters(self, filters):
+    def update_filters(self, filters: str) -> None:
+        """Updates the filter
 
-        self.__filters = filters
+        Currently, this is destructive, so new values are
+        not merged with old ones.
+        """
 
-    def get_pokes_db_size(self):
+        parts = filters.split('&')
+
+        for part in parts:
+            value, key = part.split('=')
+
+            if value == 'iv':
+                self.__payload['prevMinIV'] = self.__payload['minIV']
+                self.__payload['minIV'] = key.strip()
+            elif value == 'exiv':
+                self.__payload['exMinIV'] = key.strip()
+            else:
+                log.debug(f'Dont know filter: "{part}", ignoring...')
+
+        self.__filters_string = filters
+
+    def get_current_filters(self) -> str:
+        """Returns current filter as a string
+        (no formatting)
+        """
+        return self.__filters_string
+
+    def get_pokes_db_size(self) -> int:
+        """ Returns the size of the poke db
+        """
+
         return len(self.__pokes_db)
 
-    def is_running(self):
+    def is_running(self) -> bool:
         """ Whether the scraper is currently running """
         return self.__running
