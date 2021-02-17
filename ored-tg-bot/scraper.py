@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timedelta
 from secrets import API_ENDPOINT, DOMAIN
 from threading import Event, Thread
+from typing import List
 
 import dateutil.tz
 import requests
@@ -139,7 +140,7 @@ class OredScraper:
             return self.__update_token()
         return False
 
-    def __get_data(self) -> list(str):
+    def __get_data(self) -> List:
         """ Queries data from the endpoint and returns it as a list"""
 
         try:

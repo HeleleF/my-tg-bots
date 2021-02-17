@@ -38,6 +38,7 @@ def start(update: Update, context: CallbackContext) -> None:
     if not filters:
         context.user_data['filters'] = 'iv=97&exiv=113,149'
 
+    log.debug(f'Attempting start with filters {filters}')
     scraper.start(filters)
 
     update.message.reply_text('Scraper started')
@@ -59,7 +60,7 @@ def db_size(update: Update, context: CallbackContext) -> None:
 
 def set_filter(update: Update, context: CallbackContext) -> None:
 
-    new_filters = update.message.text
+    new_filters = update.message.text[5:]
 
     context.user_data['filters'] = new_filters
     scraper.update_filters(new_filters)
