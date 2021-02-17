@@ -323,6 +323,8 @@ class OredScraper:
         not merged with old ones.
         """
 
+        log.debug(f'Updating filters to {filters}')
+
         parts = filters.split('&')
 
         for part in parts:

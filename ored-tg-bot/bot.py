@@ -34,7 +34,9 @@ def error(update: Update, context: CallbackContext) -> None:
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
 
-    filters = context.user_data.get('filters', 'defaultfilter')
+    filters = context.user_data.get('filters', None)
+    if not filters:
+        context.user_data['filters'] = 'iv=97&exiv=113,149'
 
     scraper.start(filters)
 
