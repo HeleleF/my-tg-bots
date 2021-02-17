@@ -25,10 +25,7 @@ log.addHandler(ch)
 # Create the Updater and pass it your bot's token.
 updater = Updater(BOT_AUTH_TOKEN)
 
-poke_filter = None
-iv_filter = None
-
-def error(update: Update, context: CallbackContext):
+def error(update: Update, context: CallbackContext) -> None:
     """Log Errors caused by Updates."""
     log.error(f'Update "{update}" caused error "{context.error}"')
 
@@ -60,7 +57,7 @@ def db_size(update: Update, context: CallbackContext) -> None:
 
 def set_filter(update: Update, context: CallbackContext) -> None:
 
-    new_filters = 'bub'
+    new_filters = update.message.text
 
     context.user_data['filters'] = new_filters
     scraper.update_filters(new_filters)
@@ -78,7 +75,7 @@ def echo(update: Update, context: CallbackContext) -> None:
 log.debug('Loading scraper')
 scraper = OredScraper(tg_bot=updater.bot, chat_id=BOT_MYSELF_CHAT_ID)
 
-def main():
+def main() -> None:
     """Start the bot."""
 
     # Get the dispatcher to register handlers
