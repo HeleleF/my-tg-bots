@@ -1,27 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: UTF-8 -*-
 
-from secrets import BOT_AUTH_TOKEN, BOT_MYSELF_CHAT_ID
 import logging
-import re
+from secrets import BOT_AUTH_TOKEN, BOT_MYSELF_CHAT_ID
 
-from telegram import Update, ParseMode
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-from telegram.error import NetworkError
+from telegram import Update
+from telegram.ext import (CallbackContext, CommandHandler, Filters,
+                          MessageHandler, Updater)
 
 from scraper import OredScraper
-import time
 
 log = logging.getLogger('ored-tg')
 log.setLevel(logging.DEBUG)
 
-fh = logging.FileHandler('./ored.log', 'w', 'utf-8')
+#fh = logging.FileHandler('./ored.log', 'w', 'utf-8')
 ch = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', '%Y-%m-%d %H:%M:%S')
-fh.setFormatter(formatter)
+#fh.setFormatter(formatter)
 ch.setFormatter(formatter)
 
-log.addHandler(fh)
+#log.addHandler(fh)
 log.addHandler(ch)
 
 # Create the Updater and pass it your bot's token.
